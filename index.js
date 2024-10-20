@@ -28,6 +28,7 @@ async function getCoinPrecision(symbol) {
 
 async function getMarketDeals(symbol) {
     try {
+        console.log(`${symbol} Kontrol ediliyor`)
         const precisionInfo = await getCoinPrecision(symbol);
         if (!precisionInfo) {
             console.error(`Hassasiyet bilgisi bulunamadı: ${symbol}`);
@@ -39,13 +40,15 @@ async function getMarketDeals(symbol) {
         
         const response = await axios.get(url);
         var deals = response.data.data;
+        
+        deals.splice(-50)
+     
         const groupedDeals = {};
-        
-        deals = deals.splice(60)
-        
+
         deals.forEach(deal => {
-            const price = (deal.p / Math.pow(10, priceScale)).toFixed(priceScale);
-            const volume = (deal.v / Math.pow(10, amountScale)).toFixed(amountScale);
+            const price = deal.p; 
+            const volume = (deal.v / Math.pow(10, amountScale)); 
+            const volumeInUSDT = volume * price; 
             const time = new Date(deal.t);
             const timeKey = time.toLocaleTimeString('tr-TR');
 
@@ -54,8 +57,9 @@ async function getMarketDeals(symbol) {
             if (!groupedDeals[timeKey]) {
                 groupedDeals[timeKey] = { buy: 0, sell: 0 };
             }
-            groupedDeals[timeKey][type] += parseFloat(volume);
+            groupedDeals[timeKey][type] += parseFloat(volumeInUSDT); 
         });
+        
         
         Object.entries(groupedDeals).forEach(([timeKey, volumes]) => {
             if (volumes.buy > config.volumeThreshold) {
@@ -75,6 +79,8 @@ async function getMarketDeals(symbol) {
 }
 
 async function fetchMarketData() {
+    console.log("Bot Launched")
+    
     const response = await axios.get("https://contract.mexc.com/api/v1/contract/detail");
 
     mexcSymbolDetails = response.data.data
@@ -87,7 +93,7 @@ async function fetchMarketData() {
             if (ignoredCoins.includes(symbol)) continue;
             
             await getMarketDeals(symbol);
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 20));
         }
         
     }

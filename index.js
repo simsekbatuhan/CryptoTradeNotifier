@@ -1,6 +1,9 @@
 const axios = require('axios');
 
-const coins = ['BTC_USDT', 'ETH_USDT', 'APE_USDT'];
+const config = require('./config')
+const telegram = require('./telegram')
+
+const coins = config.coins;
 
 async function getCoinPrecision(symbol) {
     try {
@@ -53,7 +56,7 @@ async function getMarketDeals(symbol) {
         
         Object.values(groupedDeals).forEach(group => {
             if (group.volume > 1) {
-                console.log(`Coin: ${symbol}, Fiyat: ${group.price}, Toplam Miktar: ${group.volume.toFixed(amountScale)}, Zaman: ${group.time}`);
+                telegram.sendMessageToUser(config.userId, `Coin: ${symbol}, Fiyat: ${group.price}, Toplam Miktar: ${group.volume.toFixed(amountScale)}, Zaman: ${group.time}`)
             }
         });
     } catch (error) {

@@ -1,6 +1,7 @@
 const axios = require('axios');
 
 const config = require('./config')
+
 const telegram = require('./telegram')
 
 const coins = config.coins;
@@ -43,20 +44,24 @@ async function getMarketDeals(symbol) {
             const time = new Date(deal.t);
             const timeKey = time.toLocaleTimeString('tr-TR');
 
-            if (groupedDeals[timeKey]) {
-                groupedDeals[timeKey].volume += parseFloat(volume);
-            } else {
-                groupedDeals[timeKey] = {
-                    price: price,
-                    volume: parseFloat(volume),
-                    time: timeKey
-                };
+            const type = deal.T === 1 ? 'buy' : 'sell';
+
+            if (!groupedDeals[timeKey]) {
+                groupedDeals[timeKey] = { buy: 0, sell: 0 };
             }
+            groupedDeals[timeKey][type] += parseFloat(volume);
         });
         
-        Object.values(groupedDeals).forEach(group => {
-            if (group.volume > 1) {
-                telegram.sendMessageToUser(config.userId, `Coin: ${symbol}, Fiyat: ${group.price}, Toplam Miktar: ${group.volume.toFixed(amountScale)}, Zaman: ${group.time}`)
+        Object.entries(groupedDeals).forEach(([timeKey, volumes]) => {
+            if (volumes.buy > config.volumeThreshold) {
+                const message = `Coin: ${symbol}, Toplam Alım: ${volumes.buy.toFixed(4)}, Zaman: ${timeKey}`;
+                console.log(message);
+                telegram.sendMessageToUser(config.userId, message)
+            }
+            if (volumes.sell > config.volumeThreshold) {
+                const message = `Coin: ${symbol}, Toplam Satım: ${volumes.sell.toFixed(4)}, Zaman: ${timeKey}`;
+                console.log(message);
+                telegram.sendMessageToUser(config.userId, message)
             }
         });
     } catch (error) {

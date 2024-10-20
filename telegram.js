@@ -15,6 +15,10 @@ bot.onText(/\/id/, (msg) => {
 bot.onText(/\/ignore (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   const coin = match[1].toUpperCase();
+
+  const list = db.get("ignoredCoins")
+  if(list.includes(`${coin}_USDT`)) {bot.sendMessage(chatId, `Bu coin önceden eklenmiş`); return;}
+
   db.push("ignoredCoins", `${coin}_USDT`)
   bot.sendMessage(chatId, `${coin} Engellenenler listesine eklendi`);
 });
@@ -22,6 +26,10 @@ bot.onText(/\/ignore (.+)/, (msg, match) => {
 bot.onText(/\/activate (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   const coin = match[1].toUpperCase();
+  const list = db.get("ignoredCoins")
+
+  if(!list.includes(`${coin}_USDT`)) {bot.sendMessage(chatId, `Engellenmiş coinler içinde böyle bir coin bulunamadı`); return;}
+
   db.unpush("ignoredCoins", `${coin}_USDT`)
   bot.sendMessage(chatId, `${coin} Engellenenler listesinden kaldırıldı`);
 });

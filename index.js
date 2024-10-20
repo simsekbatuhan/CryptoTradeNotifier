@@ -1,11 +1,16 @@
+const WebSocket = require('ws');
 const axios = require('axios');
-const db = require("croxydb")
-const config = require('./config')
+const db = require("croxydb");
 
 db.setFolder("./database");
 
-const telegram = require('./telegram')
-const coins = config.coins;
+const config = require('./config');
+const telegram = require('./telegram');
+
+const wsUrl = 'wss://contract.mexc.com/edge';
+let ws;
+
+let coinVolumes = {}; 
 
 var mexcSymbolDetails;
 
@@ -15,7 +20,7 @@ async function getCoinPrecision(symbol) {
 
         if (coinInfo) {
             return {
-                priceScale: coinInfo.priceScale,
+                contractSize: coinInfo.contractSize,
                 amountScale: coinInfo.amountScale
             };
         }
@@ -26,77 +31,100 @@ async function getCoinPrecision(symbol) {
     }
 }
 
-async function getMarketDeals(symbol) {
-    try {
-        console.log(`${symbol} Kontrol ediliyor`)
-        const precisionInfo = await getCoinPrecision(symbol);
-        if (!precisionInfo) {
-            console.error(`Hassasiyet bilgisi bulunamadı: ${symbol}`);
-            return;
-        }
-
-        const { priceScale, amountScale } = precisionInfo;
-        const url = `https://contract.mexc.com/api/v1/contract/deals/${symbol}`;
-        
-        const response = await axios.get(url);
-        var deals = response.data.data;
-        
-        deals.splice(-50)
-     
-        const groupedDeals = {};
-
-        deals.forEach(deal => {
-            const price = deal.p; 
-            const volume = (deal.v / Math.pow(10, amountScale)); 
-            const volumeInUSDT = volume * price; 
-            const time = new Date(deal.t);
-            const timeKey = time.toLocaleTimeString('tr-TR');
-
-            const type = deal.T === 1 ? 'buy' : 'sell';
-
-            if (!groupedDeals[timeKey]) {
-                groupedDeals[timeKey] = { buy: 0, sell: 0 };
-            }
-            groupedDeals[timeKey][type] += parseFloat(volumeInUSDT); 
-        });
-        
-        
-        Object.entries(groupedDeals).forEach(([timeKey, volumes]) => {
-            if (volumes.buy > config.volumeThreshold) {
-                const message = `Coin: ${symbol}, Toplam Alım: ${volumes.buy.toFixed(4)}, Zaman: ${timeKey}`;
-                console.log(message);
-                telegram.sendMessageToUser(config.userId, message)
-            }
-            if (volumes.sell > config.volumeThreshold) {
-                const message = `Coin: ${symbol}, Toplam Satım: ${volumes.sell.toFixed(4)}, Zaman: ${timeKey}`;
-                console.log(message);
-                telegram.sendMessageToUser(config.userId, message)
-            }
-        });
-    } catch (error) {
-        console.error('API hatası:', error);
-    }
-}
-
-async function fetchMarketData() {
-    console.log("Bot Launched")
-    
+async function connectWebSocket() {
     const response = await axios.get("https://contract.mexc.com/api/v1/contract/detail");
+    mexcSymbolDetails = response.data.data.filter(symbol => symbol.symbol.includes("USDT"));
 
-    mexcSymbolDetails = response.data.data
-    const mexcSymbols = response.data.data.map(symbol => symbol.symbol);
+    ws = new WebSocket(wsUrl);
 
-    while (true) {
-        const ignoredCoins = await db.get("ignoredCoins")
-        
-        for (let symbol of mexcSymbols) {
-            if (ignoredCoins.includes(symbol)) continue;
-            
-            await getMarketDeals(symbol);
-            await new Promise(resolve => setTimeout(resolve, 20));
+    ws.on('open', function open() {
+        console.log('WebSocket connection opened.');
+        const list = db.get("ignoredCoins");
+
+        for (let coin of mexcSymbolDetails.map(symbol => symbol.symbol)) {
+            if (list.includes(coin)) continue;
+            ws.send(JSON.stringify({
+                method: "sub.deal",
+                param: { symbol: coin },
+            }));
         }
+    });
+
+    ws.on('message', async function message(data) {
+        const parsedData = JSON.parse(data);
         
-    }
+        if (parsedData && parsedData.data) {
+            const list = db.get("ignoredCoins");
+            const symbol = parsedData.symbol;
+
+            if (list.includes(symbol)) return;
+
+            const precisionInfo = await getCoinPrecision(symbol);
+            if (!precisionInfo) {
+                console.error(`Hassasiyet bilgisi bulunamadı: ${symbol}`);
+                return;
+            }
+
+            const { contractSize } = precisionInfo;
+            const tradeType = parsedData.data.T === 1 ? 'buy' : 'sell';
+            const price = parsedData.data.p; 
+            const volume = parsedData.data.v * contractSize; 
+            const volumeInUSDT = price * volume;
+
+            const currentTime = new Date().toLocaleTimeString('tr-TR');
+
+            if (!coinVolumes[symbol]) {
+                coinVolumes[symbol] = {};
+            }
+
+            if (!coinVolumes[symbol][currentTime]) {
+                coinVolumes[symbol][currentTime] = { buy: 0, sell: 0 };
+            }
+
+            coinVolumes[symbol][currentTime][tradeType] += volumeInUSDT;
+
+            setTimeout(() => {
+                const newTime = new Date().toLocaleTimeString('tr-TR');
+                
+                if (newTime !== currentTime) {
+                    const accumulatedVolume = coinVolumes[symbol][currentTime];
+
+                    if (accumulatedVolume) {
+                        if (accumulatedVolume.buy > config.volumeThreshold) {
+                            const message = `${currentTime} - ${symbol} Toplam Alış: ${accumulatedVolume.buy.toFixed(2)} USDT`;
+                            console.log(message);
+                            telegram.sendMessageToUser(config.userId, message);
+                        }
+
+                        if (accumulatedVolume.sell > config.volumeThreshold) {
+                            const message = `${currentTime} - ${symbol} Toplam Satış: ${accumulatedVolume.sell.toFixed(2)} USDT`;
+                            console.log(message);
+                            telegram.sendMessageToUser(config.userId, message);
+                        }
+
+                        delete coinVolumes[symbol][currentTime];
+                    }
+                }
+            }, 1000);
+        }
+    });
+
+    ws.on('close', function close() {
+        console.log('WebSocket connection closed. Reconnecting...');
+        reconnectWebSocket();
+    });
+
+    ws.on('error', function error(err) {
+        console.error('WebSocket error:', err);
+        ws.close();
+    });
 }
 
-fetchMarketData();
+function reconnectWebSocket() {
+    setTimeout(() => {
+        console.log('Reconnecting WebSocket...');
+        connectWebSocket();
+    }, 1000); 
+}
+
+connectWebSocket();

@@ -1,15 +1,18 @@
 const axios = require('axios');
-
+const db = require("croxydb")
 const config = require('./config')
 
-const telegram = require('./telegram')
+db.setFolder("./database");
 
+const telegram = require('./telegram')
 const coins = config.coins;
+
+var mexcSymbolDetails;
 
 async function getCoinPrecision(symbol) {
     try {
-        const response = await axios.get('https://contract.mexc.com/api/v1/contract/detail');
-        const coinInfo = response.data.data.find(coin => coin.symbol === symbol);
+        const coinInfo = mexcSymbolDetails.find(coin => coin.symbol === symbol);
+
         if (coinInfo) {
             return {
                 priceScale: coinInfo.priceScale,
@@ -35,9 +38,11 @@ async function getMarketDeals(symbol) {
         const url = `https://contract.mexc.com/api/v1/contract/deals/${symbol}`;
         
         const response = await axios.get(url);
-        const deals = response.data.data;
+        var deals = response.data.data;
         const groupedDeals = {};
-
+        
+        deals = deals.splice(60)
+        
         deals.forEach(deal => {
             const price = (deal.p / Math.pow(10, priceScale)).toFixed(priceScale);
             const volume = (deal.v / Math.pow(10, amountScale)).toFixed(amountScale);
@@ -70,11 +75,21 @@ async function getMarketDeals(symbol) {
 }
 
 async function fetchMarketData() {
-    while(true) {
-        for (const coin of coins) {
-            await getMarketDeals(coin);
+    const response = await axios.get("https://contract.mexc.com/api/v1/contract/detail");
+
+    mexcSymbolDetails = response.data.data
+    const mexcSymbols = response.data.data.map(symbol => symbol.symbol);
+
+    while (true) {
+        const ignoredCoins = await db.get("ignoredCoins")
+        
+        for (let symbol of mexcSymbols) {
+            if (ignoredCoins.includes(symbol)) continue;
+            
+            await getMarketDeals(symbol);
+            await new Promise(resolve => setTimeout(resolve, 100));
         }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        
     }
 }
 

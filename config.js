@@ -2,8 +2,8 @@ const config = {
     
     telegramToken: "",
     userId: "",
-    coins: ['BTC_USDT', 'ETH_USDT', 'APE_USDT'],
-    volumeThreshold: 1
+
+    volumeThreshold: 25000
 }
 
 module.exports = config;
